@@ -464,9 +464,19 @@ scheduler(void)
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.
+        
+        // --- התיקון שלנו ---
+        // מי שחזר אלינו עכשיו (c->proc) הוא לא בהכרח ה-p המקורי,
+        // כי עשינו קפיצות ישירות שעקפו את המתזמן!
+        // לכן נשמור מי באמת חזר, ונשחרר את המנעול *שלו*.
+        struct proc *yielded_p = c->proc;
         c->proc = 0;
+        release(&yielded_p->lock);
+        
+      } else {
+        // אם לא קפצנו לאף אחד, פשוט משחררים את p הרגיל
+        release(&p->lock);
       }
-      release(&p->lock);
     }
   }
 }
