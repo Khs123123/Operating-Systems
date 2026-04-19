@@ -6,16 +6,23 @@ int main() {
     int pid_c = fork();
 
     if (pid_c == 0) {
-        int v = co_yield(pid_p, 100);
+        // הילד מחכה לקבל מהאבא (אמור לקבל 2) [cite: 149]
+        int v = co_yield(pid_p, 1);
         printf("Child received: %d\n", v);
-        co_yield(pid_p, 0); // שחרור סופי לאבא
+        
+        // איתות אחרון כדי שהאבא יוכל לחזור מה-co_yield שלו ולהדפיס
+        co_yield(pid_p, 1);
         exit(0);
     } else {
-        sleep(5); 
-        int v = co_yield(pid_c, 200);
+        // האבא מחכה שהילד יכנס לקרנל (מונע קבלת 0)
+        sleep(10); 
+        
+        // האבא שולח 2 ומחכה לקבל 1 חזרה [cite: 153]
+        int v = co_yield(pid_c, 2);
         printf("Parent received: %d\n", v);
+        
         wait(0);
-        printf("DONE\n");
+        printf("Test complete.\n");
         exit(0);
     }
     return 0;

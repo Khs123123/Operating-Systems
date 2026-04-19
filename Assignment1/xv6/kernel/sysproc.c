@@ -107,50 +107,59 @@ extern void swtch(struct context*, struct context*);
 uint64
 sys_co_yield(void)
 {
-    int target_pid, value;
-    struct proc *p = myproc();
-    struct proc *target_p = 0;
+  int target_pid, value;
+  struct proc *p = myproc();
+  struct proc *target_p = 0;
 
-    argint(0, &target_pid);
-    argint(1, &value);
+  argint(0, &target_pid);
+  argint(1, &value);
 
-    if(target_pid == p->pid || target_pid <= 0) return -1;
+  // בדיקות תקינות לפי דרישות המטלה [cite: 183-185]
+  if(target_pid == p->pid || target_pid <= 0) return -1;
 
-    // חיפוש המטרה
-    for(target_p = proc; target_p < &proc[NPROC]; target_p++) {
-        acquire(&target_p->lock);
-        if(target_p->pid == target_pid) {
-            if(target_p->state == UNUSED || target_p->state == ZOMBIE) {
-                release(&target_p->lock);
-                return -1;
-            }
-            break; // המנעול של target_p נשאר אצלנו
-        }
-        release(&target_p->lock);
+  // חיפוש תהליך המטרה בטבלת התהליכים
+  for(struct proc *tp = proc; tp < &proc[NPROC]; tp++) {
+    acquire(&tp->lock);
+    if(tp->pid == target_pid && tp->state != UNUSED && tp->state != ZOMBIE) {
+      target_p = tp;
+      break; 
     }
+    release(&tp->lock);
+  }
 
-    if(target_p >= &proc[NPROC]) return -1;
+  if(!target_p) return -1;
 
-    // העברת הערך
-    target_p->trapframe->a0 = value;
+  // העברת הערך לרגיסטר a0 של המטרה (זה יהיה ערך החזרה של ה-Syscall שלה) [cite: 160]
+  target_p->trapframe->a0 = value;
 
-    // מעירים את המטרה (במקרה שהיא מחכה ב-co_yield)
-    if(target_p->state == SLEEPING && target_p->chan == (void*)sys_co_yield) {
-        target_p->state = RUNNABLE;
-    }
-    
-    release(&target_p->lock);
-
-    // נרדמים ומחכים שמישהו יעיר אותנו ב-chan הספציפי הזה
-    acquire(&p->lock);
-    p->chan = (void*)sys_co_yield;
+  // בדיקה אם המטרה כבר מחכה בנקודת המפגש (Rendezvous) [cite: 161, 188]
+  if(target_p->state == SLEEPING && target_p->chan == (void*)sys_co_yield) {
+    // --- ביצוע מעבר ישיר (Direct Process Switching) ---
     p->state = SLEEPING;
-    
-    sched(); // מחזירים שליטה למתזמן שיריץ את המטרה
+    p->chan = (void*)sys_co_yield;
+    target_p->state = RUNNING;
 
-    // חזרנו! מישהו העיר אותנו
+    // עדכון המעבד שמעכשיו תהליך המטרה הוא זה שרץ [cite: 209]
+    mycpu()->proc = target_p;
+
+    // ביצוע החלפת הקשר ישירה - עוקפת את המתזמן [cite: 163, 209]
+    // הערה: זה מה שיוביל ל-panic: release המאושר ע"י הסגל
+    swtch(&p->context, &target_p->context);
+
+    // חזרנו מהמעבר הישיר
+    p->chan = 0;
+    release(&target_p->lock);
+  } else {
+    // המטרה עוד לא מוכנה, נלך לישון רגיל דרך המתזמן [cite: 161, 214]
+    p->state = SLEEPING;
+    p->chan = (void*)sys_co_yield;
+    release(&target_p->lock);
+    
+    acquire(&p->lock);
+    sched(); 
     p->chan = 0;
     release(&p->lock);
+  }
 
-    return p->trapframe->a0;
+  return p->trapframe->a0;
 }
