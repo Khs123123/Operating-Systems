@@ -114,10 +114,10 @@ sys_co_yield(void)
   argint(0, &target_pid);
   argint(1, &value);
 
-  // בדיקות תקינות לפי דרישות המטלה [cite: 183-185]
+  // שגיאות קצה
   if(target_pid == p->pid || target_pid <= 0) return -1;
 
-  // חיפוש תהליך המטרה בטבלת התהליכים
+  // חיפוש תהליך המטרה - המנעול שלו (target_p->lock) נשאר נעול!
   for(struct proc *tp = proc; tp < &proc[NPROC]; tp++) {
     acquire(&tp->lock);
     if(tp->pid == target_pid && tp->state != UNUSED && tp->state != ZOMBIE) {
@@ -127,36 +127,37 @@ sys_co_yield(void)
     release(&tp->lock);
   }
 
-  if(!target_p) return -1;
+  if(!target_p || target_p->killed) {
+    if(target_p) release(&target_p->lock);
+    return -1;
+  }
 
-  // העברת הערך לרגיסטר a0 של המטרה (זה יהיה ערך החזרה של ה-Syscall שלה) [cite: 160]
+  // העברת הערך
   target_p->trapframe->a0 = value;
 
-  // בדיקה אם המטרה כבר מחכה בנקודת המפגש (Rendezvous) [cite: 161, 188]
+  // אם המטרה כבר מחכה לנו ב-co_yield
   if(target_p->state == SLEEPING && target_p->chan == (void*)sys_co_yield) {
-    // --- ביצוע מעבר ישיר (Direct Process Switching) ---
+    target_p->state = RUNNING; 
     p->state = SLEEPING;
     p->chan = (void*)sys_co_yield;
-    target_p->state = RUNNING;
-
-    // עדכון המעבד שמעכשיו תהליך המטרה הוא זה שרץ [cite: 209]
     mycpu()->proc = target_p;
-
-    // ביצוע החלפת הקשר ישירה - עוקפת את המתזמן [cite: 163, 209]
-    // הערה: זה מה שיוביל ל-panic: release המאושר ע"י הסגל
+    
+    // --- הקסם הפשוט: קופצים למטרה כש*רק* המנעול שלה מוחזק ---
     swtch(&p->context, &target_p->context);
-
-    // חזרנו מהמעבר הישיר
+    
+    // כשאנחנו מתעוררים, התהליך השני דאג להחזיק את המנעול שלנו!
+    // לכן אנחנו פשוט משחררים אותו בצורה חלקה והפסיקות (printf) חוזרות לעבוד.
     p->chan = 0;
-    release(&target_p->lock);
+    release(&p->lock);
   } else {
-    // המטרה עוד לא מוכנה, נלך לישון רגיל דרך המתזמן [cite: 161, 214]
-    p->state = SLEEPING;
-    p->chan = (void*)sys_co_yield;
+    // המטרה עוד לא מוכנה, הולכים לישון רגיל
     release(&target_p->lock);
     
     acquire(&p->lock);
+    p->state = SLEEPING;
+    p->chan = (void*)sys_co_yield;
     sched(); 
+    
     p->chan = 0;
     release(&p->lock);
   }
