@@ -446,7 +446,7 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
-  
+
   c->proc = 0;
   for(;;){
     // Avoid deadlock by ensuring that devices can interrupt.
@@ -455,26 +455,20 @@ scheduler(void)
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
       if(p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
         swtch(&c->context, &p->context);
 
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        
-        // --- התיקון שלנו ---
-        // מי שחזר אלינו עכשיו (c->proc) הוא לא בהכרח ה-p המקורי,
-        // כי עשינו קפיצות ישירות שעקפו את המתזמן!
-        // לכן נשמור מי באמת חזר, ונשחרר את המנעול *שלו*.
-        struct proc *yielded_p = c->proc;
+        // --- TASK 3 FIX: DIRECT HANDOFF ---
+        // Because of direct switching, the process that returns 
+        // to the scheduler might not be the original 'p'.
+        // We must release the lock of the process that ACTUALLY returned.
+        struct proc *returning_proc = c->proc;
         c->proc = 0;
-        release(&yielded_p->lock);
+        release(&returning_proc->lock);
         
       } else {
-        // אם לא קפצנו לאף אחד, פשוט משחררים את p הרגיל
+        // If not runnable, just release the lock normally
         release(&p->lock);
       }
     }
@@ -690,4 +684,69 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+int co_yield_process(int target_pid, int value) {
+    struct proc *p = myproc();
+    struct proc *target = 0;
+
+    // Error check: Invalid PID or yielding to self
+    if (target_pid <= 0 || target_pid == p->pid) return -1;
+
+    // 1. Find the target process and lock it
+    for(struct proc *np = proc; np < &proc[NPROC]; np++) {
+        acquire(&np->lock);
+        if(np->pid == target_pid) {
+            target = np;
+            break; // Keep target->lock acquired
+        }
+        release(&np->lock);
+    }
+
+    if(target == 0) return -1;
+
+    // 2. Lock our own process
+    acquire(&p->lock);
+
+    if(target->state == UNUSED || target->state == ZOMBIE || target->killed) {
+        release(&p->lock);
+        release(&target->lock);
+        return -1;
+    }
+
+    // 3. The Switch Logic
+    if(target->state == SLEEPING && target->chan == target) {
+        // --- DIRECT HANDOFF ---
+        target->trapframe->a0 = value; // Inject the return value
+        
+        p->state = SLEEPING;
+        p->chan = p;
+        target->state = RUNNING;
+        
+        // Hijack the CPU process pointer
+        mycpu()->proc = target;
+
+        // Release OUR lock BEFORE switching.
+        // We leave target->lock ACQUIRED because the target process 
+        // will wake up and immediately release it!
+        release(&p->lock);
+        
+        // Direct context switch bypassing the scheduler
+        swtch(&p->context, &target->context);
+        
+        // --- After waking up from another process yielding to us ---
+        release(&p->lock);
+    } else {
+        // --- WAIT FOR TARGET ---
+        p->state = SLEEPING;
+        p->chan = p;
+        release(&target->lock);
+        
+        // Use the official sched() because the target isn't ready
+        sched(); 
+        
+        release(&p->lock);
+    }
+
+    return p->trapframe->a0;
 }

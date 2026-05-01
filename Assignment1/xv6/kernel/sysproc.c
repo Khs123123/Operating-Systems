@@ -104,63 +104,13 @@ sys_memsize(void)
 extern struct proc proc[NPROC];
 extern void swtch(struct context*, struct context*); 
 
-uint64
-sys_co_yield(void)
-{
-  int target_pid, value;
-  struct proc *p = myproc();
-  struct proc *target_p = 0;
-
-  argint(0, &target_pid);
-  argint(1, &value);
-
-  // שגיאות קצה
-  if(target_pid == p->pid || target_pid <= 0) return -1;
-
-  // חיפוש תהליך המטרה - המנעול שלו (target_p->lock) נשאר נעול!
-  for(struct proc *tp = proc; tp < &proc[NPROC]; tp++) {
-    acquire(&tp->lock);
-    if(tp->pid == target_pid && tp->state != UNUSED && tp->state != ZOMBIE) {
-      target_p = tp;
-      break; 
-    }
-    release(&tp->lock);
-  }
-
-  if(!target_p || target_p->killed) {
-    if(target_p) release(&target_p->lock);
-    return -1;
-  }
-
-  // העברת הערך
-  target_p->trapframe->a0 = value;
-
-  // אם המטרה כבר מחכה לנו ב-co_yield
-  if(target_p->state == SLEEPING && target_p->chan == (void*)sys_co_yield) {
-    target_p->state = RUNNING; 
-    p->state = SLEEPING;
-    p->chan = (void*)sys_co_yield;
-    mycpu()->proc = target_p;
+uint64 sys_co_yield(void) {
+    int target_pid, value;
     
-    // --- הקסם הפשוט: קופצים למטרה כש*רק* המנעול שלה מוחזק ---
-    swtch(&p->context, &target_p->context);
-    
-    // כשאנחנו מתעוררים, התהליך השני דאג להחזיק את המנעול שלנו!
-    // לכן אנחנו פשוט משחררים אותו בצורה חלקה והפסיקות (printf) חוזרות לעבוד.
-    p->chan = 0;
-    release(&p->lock);
-  } else {
-    // המטרה עוד לא מוכנה, הולכים לישון רגיל
-    release(&target_p->lock);
-    
-    acquire(&p->lock);
-    p->state = SLEEPING;
-    p->chan = (void*)sys_co_yield;
-    sched(); 
-    
-    p->chan = 0;
-    release(&p->lock);
-  }
+    // Extract the arguments
+    argint(0, &target_pid);
+    argint(1, &value);
 
-  return p->trapframe->a0;
+    // Call the core logic in proc.c
+    return co_yield_process(target_pid, value);
 }
