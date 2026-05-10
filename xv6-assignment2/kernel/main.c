@@ -8,6 +8,7 @@
 #include "spinlock.h"
 extern struct spinlock rand_lock;
 // --------------------------------------
+extern void israeli_init(void);
 
 volatile static int started = 0;
 
@@ -36,6 +37,9 @@ main()
     // --- ADD THIS LINE FOR TASK 0 ---
     initlock(&rand_lock, "rand_lock");
     // --------------------------------
+    // --- ADD THIS FOR TASK 1 ---
+    israeli_init();
+    // ---------------------------
     userinit();      // first user process
     __sync_synchronize();
     started = 1;
