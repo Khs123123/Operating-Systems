@@ -24,6 +24,10 @@ int getpid(void);
 char* sys_sbrk(int,int);
 int pause(int);
 int uptime(void);
+// --- ADD THESE TWO LINES FOR TASK 0 ---
+void lcg_srand(uint seed);
+uint lcg_rand(void);
+// --------------------------------------
 
 // ulib.c
 int stat(const char*, struct stat*);

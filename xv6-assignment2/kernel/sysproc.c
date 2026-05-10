@@ -107,3 +107,42 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+
+// 1. Define the global randomness state and the lock
+static uint random_state = 1;
+struct spinlock rand_lock;
+
+// 2. Implement the kernel functions
+void lcg_srand(uint seed) {
+  acquire(&rand_lock);
+  random_state = seed;
+  release(&rand_lock);
+}
+
+uint lcg_rand(void) {
+  uint a = 1664525;
+  uint b = 1013904223;
+  uint current_val;
+
+  acquire(&rand_lock);
+  // Unsigned 32-bit integer overflow automatically handles the modulo 2^32
+  random_state = a * random_state + b;
+  current_val = random_state;
+  release(&rand_lock);
+
+  return current_val;
+}
+
+uint64 sys_lcg_srand(void) {
+  int seed;
+  // Just fetch the argument directly. No need to check for < 0!
+  argint(0, &seed);
+  
+  lcg_srand((uint)seed);
+  return 0; 
+}
+
+uint64 sys_lcg_rand(void) {
+  return lcg_rand(); 
+}
