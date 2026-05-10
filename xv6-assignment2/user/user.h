@@ -28,13 +28,16 @@ int uptime(void);
 void lcg_srand(uint seed);
 uint lcg_rand(void);
 // --------------------------------------
-// --- ADD THESE TWO LINES FOR TASK 1 ---
+// --- ADD THESE TWO LINES FOR TASK 1+2 ---
 int setgid(int gid);
 int getgid(void);
 int israeli_create(int favoritism);
 int israeli_destroy(int lock_id);
 int israeli_acquire(int lock_id);
 int israeli_release(int lock_id);
+int init_scores(void);
+int inc_score(int team_id);
+// ---------------------------
 
 
 // ulib.c

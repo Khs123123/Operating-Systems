@@ -335,3 +335,41 @@ uint64 sys_israeli_release(void) {
   release(&is_locks[lock_id].lk);
   return 0;
 }
+
+// --- Relay Race Scoreboard ---
+#define MAX_TEAMS 10
+int team_scores[MAX_TEAMS];
+struct spinlock score_lock;
+int score_lock_init = 0; // Tracks if we initialized the lock
+
+uint64 sys_init_scores(void) {
+  // Lazy initialization of the lock so we don't have to edit main.c!
+  if(score_lock_init == 0) {
+    initlock(&score_lock, "score_lock");
+    score_lock_init = 1;
+  }
+  
+  acquire(&score_lock);
+  for(int i = 0; i < MAX_TEAMS; i++) {
+    team_scores[i] = 0;
+  }
+  release(&score_lock);
+  
+  return 0;
+}
+
+uint64 sys_inc_score(void) {
+  int team_id;
+  
+  // Fetch the argument
+  argint(0, &team_id);
+  
+  if(team_id < 0 || team_id >= MAX_TEAMS) return -1;
+  
+  acquire(&score_lock);
+  team_scores[team_id]++;
+  int current_score = team_scores[team_id];
+  release(&score_lock);
+  
+  return current_score;
+}
