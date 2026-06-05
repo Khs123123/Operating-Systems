@@ -158,8 +158,17 @@ freeproc(struct proc *p)
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
-  if(p->pagetable)
+  
+  if(p->pagetable){
+    // Safely unmap the screen without deleting the physical pixels
+    if(p->fb_va != 0) {
+      uvmunmap(p->pagetable, p->fb_va, 300, 0); // The 0 means DO NOT delete physical memory
+      p->fb_va = 0;
+    }
+    
     proc_freepagetable(p->pagetable, p->sz);
+  }
+  
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -168,6 +177,7 @@ freeproc(struct proc *p)
   p->chan = 0;
   p->killed = 0;
   p->xstate = 0;
+  p->fb_va = 0; // Make sure to reset this for the next time this slot is used
   p->state = UNUSED;
 }
 

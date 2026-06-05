@@ -11,12 +11,12 @@ static int loadseg(pde_t *, uint64, struct inode *, uint, uint);
 
 int flags2perm(int flags)
 {
-    int perm = 0;
-    if(flags & 0x1)
-      perm = PTE_X;
-    if(flags & 0x2)
-      perm |= PTE_W;
-    return perm;
+  int perm = 0;
+  if(flags & 0x1)
+    perm = PTE_X;
+  if(flags & 0x2)
+    perm |= PTE_W;
+  return perm;
 }
 
 int
@@ -126,6 +126,13 @@ exec(char *path, char **argv)
   p->sz = sz;
   p->trapframe->epc = elf.entry;  // initial program counter = main
   p->trapframe->sp = sp; // initial stack pointer
+  
+  // --- ADDED SAFETY UNMAP FOR TASK 1 ---
+  if(p->fb_va != 0) {
+    uvmunmap(oldpagetable, p->fb_va, 300, 0); // The 0 means DO NOT delete physical memory
+    p->fb_va = 0;
+  }
+
   proc_freepagetable(oldpagetable, oldsz);
 
   return argc; // this ends up in a0, the first argument to main(argc, argv)

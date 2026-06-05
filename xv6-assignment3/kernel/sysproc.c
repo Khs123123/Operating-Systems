@@ -116,5 +116,37 @@ sys_flip_display(void)
 uint64
 sys_map_display(void)
 {
-  return -1;
+  uint64 addr;
+  struct proc *p = myproc();
+
+  // 1. Read the 0th argument from the user into the 'addr' variable
+  // (In this xv6 template, argaddr returns void)
+  argaddr(0, &addr);
+
+  // 2. Validate or auto-select the virtual address
+  if(addr == 0) {
+    // Auto-select a page-aligned virtual address above the process size
+    addr = PGROUNDUP(p->sz);
+  } else {
+    // User supplied an address. It must be page-aligned.
+    if(addr % PGSIZE != 0)
+      return -1;
+      
+    // It must not collide with existing mappings (must be above p->sz)
+    if(addr < p->sz)
+      return -1;
+      
+    // The entire 300-page framebuffer must fit inside valid virtual memory
+    if(addr + 300 * PGSIZE > MAXVA)
+      return -1;
+  }
+
+  // 3. Delegate the actual page-table mapping to a helper function in vm.c
+  extern int map_framebuffer(pagetable_t pagetable, uint64 va);
+  if(map_framebuffer(p->pagetable, addr) < 0)
+    return -1;
+
+  p->fb_va = addr;             // ADD THIS LINE
+  // 4. Return the newly mapped virtual address to the user
+  return addr;
 }

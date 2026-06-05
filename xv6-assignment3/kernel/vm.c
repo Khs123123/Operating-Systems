@@ -440,3 +440,26 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+// --- NEW FUNCTION ADDED FOR ASSIGNMENT 3 ---
+extern void *fb[]; // Array of 300 pointers to physical pages
+
+// map_framebuffer: Maps the 300 pages of the GPU framebuffer into 
+// the user's page table at the requested virtual address.
+int
+map_framebuffer(pagetable_t pagetable, uint64 va)
+{
+  int perm = PTE_U | PTE_R | PTE_W;
+
+  // The framebuffer is made of 300 separate, non-contiguous physical pages.
+  // We must map them one by one into a contiguous virtual block for the user.
+  for(int i = 0; i < 300; i++){
+    uint64 page_va = va + (i * PGSIZE);
+    uint64 page_pa = (uint64)fb[i];
+    
+    if(mappages(pagetable, page_va, PGSIZE, page_pa, perm) != 0){
+      return -1;
+    }
+  }
+  return 0;
+}

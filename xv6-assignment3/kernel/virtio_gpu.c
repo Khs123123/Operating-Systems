@@ -145,7 +145,7 @@ static struct
 
 // ── Framebuffer page pointers ────────────────────────────────────────
 
-static void *fb[FB_PAGES];
+void *fb[FB_PAGES]; // Changed from static void *fb[FB_PAGES];
 
 // ── RESOURCE_ATTACH_BACKING command buffer (header + all entries) ────
 
