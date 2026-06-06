@@ -158,6 +158,13 @@ freeproc(struct proc *p)
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
+
+  // ADD THESE 5 LINES: Revert the GPU if this process flipped it
+  extern void virtio_gpu_restore(void);
+  if(p->flipped) {
+    virtio_gpu_restore();
+    p->flipped = 0;
+  }
   
   if(p->pagetable){
     // Safely unmap the screen without deleting the physical pixels

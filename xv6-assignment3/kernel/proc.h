@@ -106,4 +106,5 @@ struct proc {
   char name[16];               // Process name (debugging)
 
   uint64 fb_va;                // ADD THIS: Remembers the framebuffer address
+  int flipped;                 // ADD THIS: Tracks whether the framebuffer has been flipped
 };

@@ -578,3 +578,53 @@ void display_daemon(void)
         acquire(&tickslock);
     }
 }
+
+// ── Public: Flip the display to a new user buffer ────────────────────
+// Translates the user's virtual address into physical pages and
+// points the GPU to read from them instead of the kernel framebuffer.
+int virtio_gpu_flip(pagetable_t pagetable, uint64 va)
+{
+    // ADDED 'static' to move this 4800-byte array off the tiny kernel stack!
+    static struct virtio_gpu_mem_entry entries[FB_PAGES];
+
+    // 1. Loop through all 300 pages of the user's buffer
+    for(int i = 0; i < FB_PAGES; i++) {
+        uint64 page_va = va + (i * PGSIZE);
+        
+        // Find the physical address in RAM for this virtual page
+        uint64 pa = walkaddr(pagetable, page_va);
+        if(pa == 0) {
+            return -1; // If a page is missing or invalid, fail safely
+        }
+        
+        // Add it to our new backing list
+        entries[i].addr = pa;
+        entries[i].length = PGSIZE;
+        entries[i].padding = 0;
+    }
+
+    // 2. Detach the old display memory from the GPU
+    gpu_cmd_detach();
+
+    // 3. Attach our newly built list of the user's physical pages
+    gpu_cmd_attach(entries, FB_PAGES);
+
+    return 0;
+}
+
+// ── Public: Restore the kernel framebuffer ───────────────────────────
+// Called when a process that flipped the display exits.
+void virtio_gpu_restore(void)
+{
+    static struct virtio_gpu_mem_entry fb_entries[FB_PAGES];
+    
+    // We already made fb non-static earlier, so we can access it
+    for (int i = 0; i < FB_PAGES; i++) {
+        fb_entries[i].addr   = (uint64)fb[i];
+        fb_entries[i].length = PGSIZE;
+        fb_entries[i].padding = 0;
+    }
+    
+    gpu_cmd_detach();
+    gpu_cmd_attach(fb_entries, FB_PAGES);
+}

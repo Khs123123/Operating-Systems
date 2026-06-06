@@ -96,12 +96,32 @@ sys_uptime(void)
 // that is exactly GPU_FB_PAGES (300) * PGSIZE bytes (i.e. 640x480x4 =
 // 1,228,800 bytes).  The buffer must already be fully mapped in the
 // calling process's address space.
-//
-// TODO: Students implement this syscall.
 uint64
 sys_flip_display(void)
 {
-  return -1;
+  uint64 addr;
+  struct proc *p = myproc();
+
+  // 1. Read the void *buf argument from userspace
+  argaddr(0, &addr);
+
+  // 2. Validate that buf is page-aligned
+  if(addr % PGSIZE != 0)
+    return -1;
+
+  // 3. Ensure the buffer doesn't overflow maximum virtual memory
+  if(addr + 300 * PGSIZE > MAXVA)
+    return -1;
+
+  // 4. Call virtio_gpu_flip to re-point the device to the current process' buffer
+  extern int virtio_gpu_flip(pagetable_t pagetable, uint64 va);
+  if(virtio_gpu_flip(p->pagetable, addr) < 0)
+    return -1;
+
+  p->flipped = 1; // ADD THIS LINE: Mark that we've flipped to a user buffer
+
+  // Return 0 on success
+  return 0;
 }
 
 // sys_map_display: map the GPU's kernel framebuffer pages (fb[]) directly
@@ -111,8 +131,6 @@ sys_flip_display(void)
 //   Pass 0 to let the kernel auto-select the next available VA above p->sz.
 //
 // Returns the mapped virtual address on success, (uint64)-1 on failure.
-//
-// TODO: Students implement this syscall.
 uint64
 sys_map_display(void)
 {
@@ -145,8 +163,9 @@ sys_map_display(void)
   extern int map_framebuffer(pagetable_t pagetable, uint64 va);
   if(map_framebuffer(p->pagetable, addr) < 0)
     return -1;
+  
+  p->fb_va = addr;
 
-  p->fb_va = addr;             // ADD THIS LINE
   // 4. Return the newly mapped virtual address to the user
   return addr;
 }
