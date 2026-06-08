@@ -146,6 +146,9 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  p->display_va = 0;
+  p->flip_buf = 0;
+
   return p;
 }
 
@@ -159,23 +162,18 @@ freeproc(struct proc *p)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
 
-  // ADD THESE 5 LINES: Revert the GPU if this process flipped it
-  extern void virtio_gpu_restore(void);
-  if(p->flipped) {
-    virtio_gpu_restore();
-    p->flipped = 0;
+  if (p->display_va != 0) {
+      uvmunmap(p->pagetable, p->display_va, 300, 0); // 300 is FB_PAGES, do_free is 0
+      p->display_va = 0;
   }
   
-  if(p->pagetable){
-    // Safely unmap the screen without deleting the physical pixels
-    if(p->fb_va != 0) {
-      uvmunmap(p->pagetable, p->fb_va, 300, 0); // The 0 means DO NOT delete physical memory
-      p->fb_va = 0;
-    }
-    
+  if (p->flip_buf != 0) {
+      virtio_gpu_revert_and_save(p->pagetable, p->flip_buf);
+      p->flip_buf = 0;
+  }
+
+  if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
-  }
-  
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -184,7 +182,6 @@ freeproc(struct proc *p)
   p->chan = 0;
   p->killed = 0;
   p->xstate = 0;
-  p->fb_va = 0; // Make sure to reset this for the next time this slot is used
   p->state = UNUSED;
 }
 

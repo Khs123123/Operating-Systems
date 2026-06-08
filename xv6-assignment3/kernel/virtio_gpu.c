@@ -145,7 +145,7 @@ static struct
 
 // ── Framebuffer page pointers ────────────────────────────────────────
 
-void *fb[FB_PAGES]; // Changed from static void *fb[FB_PAGES];
+static void *fb[FB_PAGES];
 
 // ── RESOURCE_ATTACH_BACKING command buffer (header + all entries) ────
 
@@ -579,50 +579,71 @@ void display_daemon(void)
     }
 }
 
-// ── Public: Flip the display to a new user buffer ────────────────────
-// Translates the user's virtual address into physical pages and
-// points the GPU to read from them instead of the kernel framebuffer.
-int virtio_gpu_flip(pagetable_t pagetable, uint64 va)
+// ── Public: Map the framebuffer into a user page table ───────────────
+int
+virtio_gpu_map_fb(pagetable_t pagetable, uint64 va)
 {
-    // ADDED 'static' to move this 4800-byte array off the tiny kernel stack!
+    for (int i = 0; i < FB_PAGES; i++) {
+        uint64 pa = (uint64)fb[i];
+        
+        // Map with User (PTE_U), Read (PTE_R), and Write (PTE_W) permissions
+        if (mappages(pagetable, va + i * PGSIZE, PGSIZE, pa, PTE_U | PTE_R | PTE_W) != 0) {
+            
+            // If mapping fails midway, rollback the mappings we just created.
+            // do_free is set to 0 because these pages belong to the kernel/GPU.
+            if (i > 0) {
+                uvmunmap(pagetable, va, i, 0);
+            }
+            return -1;
+        }
+    }
+    return 0;
+}
+
+// ── Public: Zero-Copy Page Flip ───────────────────────────────────────
+int
+virtio_gpu_flip(pagetable_t pagetable, uint64 buf)
+{
     static struct virtio_gpu_mem_entry entries[FB_PAGES];
 
-    // 1. Loop through all 300 pages of the user's buffer
-    for(int i = 0; i < FB_PAGES; i++) {
-        uint64 page_va = va + (i * PGSIZE);
+    // 1. Validate and translate the user buffer
+    for (int i = 0; i < FB_PAGES; i++) {
+        uint64 va = buf + (i * PGSIZE);
+        uint64 pa = walkaddr(pagetable, va);
         
-        // Find the physical address in RAM for this virtual page
-        uint64 pa = walkaddr(pagetable, page_va);
-        if(pa == 0) {
-            return -1; // If a page is missing or invalid, fail safely
+        // If walkaddr returns 0, the page isn't valid or lacks user permissions
+        if (pa == 0) {
+            return -1; 
         }
         
-        // Add it to our new backing list
         entries[i].addr = pa;
         entries[i].length = PGSIZE;
-        entries[i].padding = 0;
     }
 
-    // 2. Detach the old display memory from the GPU
+    // 2. Execute the hardware flip
     gpu_cmd_detach();
-
-    // 3. Attach our newly built list of the user's physical pages
     gpu_cmd_attach(entries, FB_PAGES);
 
     return 0;
 }
 
-// ── Public: Restore the kernel framebuffer ───────────────────────────
-// Called when a process that flipped the display exits.
-void virtio_gpu_restore(void)
+// ── Public: Restore Framebuffer on Process Exit ────────────────────────
+void
+virtio_gpu_revert_and_save(pagetable_t pagetable, uint64 buf)
 {
-    static struct virtio_gpu_mem_entry fb_entries[FB_PAGES];
-    
-    // We already made fb non-static earlier, so we can access it
+    // 1. Deep copy the user's flipped buffer back into the safe kernel fb[]
     for (int i = 0; i < FB_PAGES; i++) {
-        fb_entries[i].addr   = (uint64)fb[i];
+        uint64 pa = walkaddr(pagetable, buf + (i * PGSIZE));
+        if (pa != 0) {
+            memmove(fb[i], (void *)pa, PGSIZE);
+        }
+    }
+
+    // 2. Re-attach the hardware to the kernel fb[]
+    static struct virtio_gpu_mem_entry fb_entries[FB_PAGES];
+    for (int i = 0; i < FB_PAGES; i++) {
+        fb_entries[i].addr = (uint64)fb[i];
         fb_entries[i].length = PGSIZE;
-        fb_entries[i].padding = 0;
     }
     
     gpu_cmd_detach();

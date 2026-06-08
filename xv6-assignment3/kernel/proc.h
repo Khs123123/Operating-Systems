@@ -105,6 +105,6 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
 
-  uint64 fb_va;                // ADD THIS: Remembers the framebuffer address
-  int flipped;                 // ADD THIS: Tracks whether the framebuffer has been flipped
+  uint64 display_va;         // If non-zero, the user virtual address where the GPU framebuffer is mapped.
+  uint64 flip_buf;         // If non-zero, the user virtual address of the buffer passed to sys_flip_display.
 };

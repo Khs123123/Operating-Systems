@@ -190,6 +190,9 @@ void            virtio_disk_intr(void);
 void            virtio_gpu_init(void);
 void            virtio_gpu_commit(void);
 void            display_daemon(void);
+int             virtio_gpu_map_fb(pagetable_t pagetable, uint64 va);
+int             virtio_gpu_flip(pagetable_t pagetable, uint64 buf);
+void            virtio_gpu_revert_and_save(pagetable_t pagetable, uint64 buf);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))

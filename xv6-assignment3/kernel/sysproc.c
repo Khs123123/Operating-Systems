@@ -96,31 +96,29 @@ sys_uptime(void)
 // that is exactly GPU_FB_PAGES (300) * PGSIZE bytes (i.e. 640x480x4 =
 // 1,228,800 bytes).  The buffer must already be fully mapped in the
 // calling process's address space.
+//
+// TODO: Students implement this syscall.
 uint64
 sys_flip_display(void)
 {
-  uint64 addr;
+  uint64 buf;
+  argaddr(0, &buf);
+  
   struct proc *p = myproc();
 
-  // 1. Read the void *buf argument from userspace
-  argaddr(0, &addr);
-
-  // 2. Validate that buf is page-aligned
-  if(addr % PGSIZE != 0)
+  // Validate that the user buffer is strictly page-aligned
+  if (buf % PGSIZE != 0) {
     return -1;
+  }
 
-  // 3. Ensure the buffer doesn't overflow maximum virtual memory
-  if(addr + 300 * PGSIZE > MAXVA)
+  // The rest of the validation (checking if all pages are mapped) 
+  // is handled by walkaddr inside virtio_gpu_flip.
+  if (virtio_gpu_flip(p->pagetable, buf) < 0) {
     return -1;
+  }
 
-  // 4. Call virtio_gpu_flip to re-point the device to the current process' buffer
-  extern int virtio_gpu_flip(pagetable_t pagetable, uint64 va);
-  if(virtio_gpu_flip(p->pagetable, addr) < 0)
-    return -1;
+  p->flip_buf = buf;
 
-  p->flipped = 1; // ADD THIS LINE: Mark that we've flipped to a user buffer
-
-  // Return 0 on success
   return 0;
 }
 
@@ -131,41 +129,59 @@ sys_flip_display(void)
 //   Pass 0 to let the kernel auto-select the next available VA above p->sz.
 //
 // Returns the mapped virtual address on success, (uint64)-1 on failure.
+//
+// TODO: Students implement this syscall.
 uint64
 sys_map_display(void)
 {
   uint64 addr;
-  struct proc *p = myproc();
-
-  // 1. Read the 0th argument from the user into the 'addr' variable
-  // (In this xv6 template, argaddr returns void)
   argaddr(0, &addr);
 
-  // 2. Validate or auto-select the virtual address
-  if(addr == 0) {
-    // Auto-select a page-aligned virtual address above the process size
-    addr = PGROUNDUP(p->sz);
-  } else {
-    // User supplied an address. It must be page-aligned.
-    if(addr % PGSIZE != 0)
-      return -1;
-      
-    // It must not collide with existing mappings (must be above p->sz)
-    if(addr < p->sz)
-      return -1;
-      
-    // The entire 300-page framebuffer must fit inside valid virtual memory
-    if(addr + 300 * PGSIZE > MAXVA)
-      return -1;
+  struct proc *p = myproc();
+  uint64 fb_size = 300 * PGSIZE;
+
+  if (addr == 0) {
+    // Search for a free contiguous block starting below the Trapframe
+    // TRAPFRAME is at MAXVA - 2*PGSIZE
+    uint64 search_addr = PGROUNDDOWN(MAXVA - 2 * PGSIZE - fb_size);
+    
+    while (search_addr >= PGROUNDUP(p->sz)) {
+      int collision = 0;
+      for (uint64 a = search_addr; a < search_addr + fb_size; a += PGSIZE) {
+        pte_t *pte = walk(p->pagetable, a, 0);
+        if (pte != 0 && (*pte & PTE_V)) {
+          collision = 1;
+          break; // Found a collision, break and try a lower address
+        }
+      }
+      if (!collision) {
+        addr = search_addr; // Found a safe, unmapped region!
+        break;
+      }
+      search_addr -= PGSIZE; // Move down 1 page and try again
+    }
   }
 
-  // 3. Delegate the actual page-table mapping to a helper function in vm.c
-  extern int map_framebuffer(pagetable_t pagetable, uint64 va);
-  if(map_framebuffer(p->pagetable, addr) < 0)
+  // 1. Validate alignment and boundaries
+  if (addr == 0 || addr % PGSIZE != 0 || addr + fb_size > MAXVA || addr < PGROUNDUP(p->sz)) {
     return -1;
-  
-  p->fb_va = addr;
+  }
 
-  // 4. Return the newly mapped virtual address to the user
+  // 2. Check for collisions (in case the user provided a specific non-zero addr)
+  for (uint64 a = addr; a < addr + fb_size; a += PGSIZE) {
+    pte_t *pte = walk(p->pagetable, a, 0);
+    if (pte != 0 && (*pte & PTE_V)) {
+      return -1;
+    }
+  }
+
+  // 3. Map the physical framebuffer pages
+  if (virtio_gpu_map_fb(p->pagetable, addr) < 0) {
+    return -1;
+  }
+
+  // Track the mapping so freeproc() can clean it up
+  p->display_va = addr; 
+  
   return addr;
 }
